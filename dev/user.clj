@@ -1,5 +1,6 @@
 (ns user
- (:require [clj-stomp.alpha.client :as c]))
+ (:require [clj-stomp.alpha.client :as c]
+           [clj-stomp.alpha.transport.netty]))
 
 (def opts {:host         "datafeeds.networkrail.co.uk"
            :port         61618

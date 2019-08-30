@@ -5,7 +5,9 @@
             [clj-stomp.alpha.transport.netty :as n]
             [clj-stomp.alpha.specs]))
 
-(st/instrument)
+(use-fixtures :once (fn [f]
+                      (st/instrument)
+                      (f)))
 
 (def debug false)
 (def opts {:debug debug})

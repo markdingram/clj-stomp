@@ -159,6 +159,7 @@
   (.shutdownGracefully event-loop))
 
 (defn- netty-send! [transport msg]
+  (log/info (str "netty-send!" msg))
   (if-let [channel (get-channel transport)]
     (.writeAndFlush channel (msg->netty msg))
     (doto (CompletableFuture.)

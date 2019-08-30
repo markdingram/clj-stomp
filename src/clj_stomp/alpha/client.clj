@@ -42,43 +42,75 @@
                                 login (assoc :stomp.header/login login)
                                 passcode (assoc :stomp.header/passcode passcode))})
 
+; receipt will be added before sending
+(defn ->disconnect-frame []
+  {:stomp.frame/command :stomp.command/disconnect})
+
+(defn next-id [client prefix]
+  (let [id-fn (get-in client [:opts :id-fn])]
+    (str prefix (id-fn))))
+
 (defn- success? [^Future fut]
   (.get fut)
   true)
 
-(defn- customise-frame [client msg]
+(defn- customise-frame [client frame]
   (let [customise-fn (get-in client [:opts :customise-msg-fn] identity)]
-    (customise-fn msg)))
+    (customise-fn frame)))
 
-(defn send! [{:keys [:transport] :as client} frame]
-  (->> frame
-       (customise-frame frame)
-       (transport/-send! transport)))
+(defn- add-receipt [receipt-id frame]
+  (log/info "add-receipt" receipt-id frame)
+  (assoc-in frame [:stomp.frame/headers (headers :stomp.header/receipt)] receipt-id))
 
+(defn send!
+  ([{:keys [:transport] :as client} frame]
+   (->> frame
+        (customise-frame client)
+        (transport/-send! transport)))
+  ([{:keys [:transport] :as client} frame receipt-promise]
+   (let [receipt-id (next-id client "message-")]
+     (swap! (:state client) assoc-in [:receipts receipt-id] receipt-promise)
+     (->> frame
+        (add-receipt receipt-id)
+        (send! client)))))
 
 (defn subscribe! [{:keys [opts] :as client} destination cb]
   (log/info "Subscribing to" destination)
   (let [id-fn (:id-fn opts)
         id (str "sub-" (id-fn))
-        fut (send! client (->subscribe-frame destination id))]
+        receipt-promise (promise)
+        fut (send! client (->subscribe-frame destination id) receipt-promise)]
     (if (success? fut)
       (do
         (log/info "Subscribed to" destination " with " id)
-        (swap! (:state client) assoc-in [:subs id] cb)))))
+        (swap! (:state client) assoc-in [:subs id] cb)))
+    receipt-promise))
 
 (defn close! [{:keys [:transport] :as client}]
-  ;; TODO: send disconnect and wait for response
-  (transport/-close! transport))
+  (let [disconnect-promise (promise)]
+    (send! client (->disconnect-frame) disconnect-promise)
+    (deref disconnect-promise 5000 true)
+    (transport/-close! transport)))
 
 (defn get-cb [client msg]
   (let [msg-id (get-in msg [:stomp.frame/headers (headers :stomp.header/subscription)])]
     (get-in @(:state client) [:subs msg-id])))
 
-(defn on-message-received [client msg]
-  (log/info "on-message-received" msg)
-  ;(println @(:state client))
-  (when-let [cb (get-cb client msg)]
-    (cb msg)))
+(defn remove-receipt [state receipt-id]
+  (update-in state [:receipts] dissoc receipt-id))
+
+(defn get-receipt-promise [client frame]
+  (let [receipt-id (get-in frame [:stomp.frame/headers (headers :stomp.header/receipt-id)])
+        [before _](swap-vals! (:state client) remove-receipt receipt-id)]
+    (get-in before [:receipts receipt-id])))
+
+(defn on-message-received [client frame]
+  (log/info "on-message-received" frame)
+  (if (= :stomp.command/receipt (:stomp.frame/command frame))
+    (when-let [receipt-promise (get-receipt-promise client frame)]
+      (deliver receipt-promise frame))
+    (when-let [cb (get-cb client frame)]
+      (cb frame))))
 
 (defn connect! [{:keys [transport] :as client} connection-params]
   @(transport/-connect! transport connection-params (partial on-message-received client))

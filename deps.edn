@@ -1,12 +1,10 @@
 {:paths ["src"]
  :deps {org.clojure/clojure {:mvn/version "1.10.1"}
         org.clojure/spec.alpha {:mvn/version "0.2.176"}
-        org.clojure/tools.logging {:mvn/version "0.4.1"}
+        org.clojure/tools.logging {:mvn/version "0.5.0"}
 
-        io.netty/netty-codec-stomp  {:mvn/version "4.1.37.Final"}
-        io.netty/netty-common       {:mvn/version "4.1.37.Final"}
-        io.netty/netty-handler      {:mvn/version "4.1.37.Final"}}
+        io.netty/netty-codec-stomp  {:mvn/version "4.1.39.Final"}
+        io.netty/netty-common       {:mvn/version "4.1.39.Final"}
+        io.netty/netty-handler      {:mvn/version "4.1.39.Final"}}
  :aliases {:test {:extra-paths ["dev", "test"]
-                  :extra-deps  {lambdaisland/kaocha {:mvn/version "0.0-529"}
-                                ;org.clojure/test.check {:mvn/version "0.10.0-alpha4"}
-                                org.clojure/core.async {:mvn/version "0.4.490"}}}}}
+                  :extra-deps  {lambdaisland/kaocha {:mvn/version "0.0-529"}}}}}

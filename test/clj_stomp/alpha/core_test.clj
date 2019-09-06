@@ -39,8 +39,12 @@
       @(c/send! publisher test1-msg)
       @(c/send! publisher test2-msg test2-receipt)
 
+      (println (c/info listener))
+
       (check-msg test1-msg (deref test1-received 2000 nil))
       (check-msg test2-msg (deref test2-received 2000 nil))
+
+      (println (c/info listener))
 
       (let [receipt-msg (deref test2-receipt 5000 false)]
         (is (= :stomp.command/receipt (:stomp.frame/command receipt-msg)))))))

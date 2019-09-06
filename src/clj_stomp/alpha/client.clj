@@ -2,7 +2,8 @@
   (:require [clojure.tools.logging :as log]
             [clj-stomp.alpha.transport :as transport])
   (:import (java.io Closeable)
-           (java.util.concurrent Future)))
+           (java.util.concurrent Future)
+           (java.util Date)))
 
 (def headers #:stomp.header{:accept-version "accept-version"
                             :host "host"
@@ -83,7 +84,7 @@
     (if (success? fut)
       (do
         (log/info "Subscribed to" destination " with " id)
-        (swap! (:state client) assoc-in [:subs id] cb)))
+        (swap! (:state client) assoc-in [:subs id] {:subscription id :destination destination :cb cb :count 0 :subscribed-at (Date.)})))
     receipt-promise))
 
 (defn close! [{:keys [:transport] :as client}]
@@ -92,25 +93,45 @@
     (deref disconnect-promise 5000 true)
     (transport/-close! transport)))
 
-(defn get-cb [client msg]
-  (let [msg-id (get-in msg [:stomp.frame/headers (headers :stomp.header/subscription)])]
-    (get-in @(:state client) [:subs msg-id])))
-
 (defn remove-receipt [state receipt-id]
   (update-in state [:receipts] dissoc receipt-id))
 
+(defn get-header [frame header]
+  (get-in frame [:stomp.frame/headers (headers header)]))
+
 (defn get-receipt-promise [client frame]
-  (let [receipt-id (get-in frame [:stomp.frame/headers (headers :stomp.header/receipt-id)])
+  (let [receipt-id (get-header frame :stomp.header/receipt-id)
         [before _](swap-vals! (:state client) remove-receipt receipt-id)]
     (get-in before [:receipts receipt-id])))
+
+; subscription record is a map {:cb cb :count int :timestamp timestamp }
+(defn update-sub [sub frame]
+  (-> sub
+      (update :count inc)
+      (assoc :last-frame-timestamp (Date.)
+             :last-frame frame)))
+
+(defn update-if-contains
+  [m ks f & args]
+  (if (get-in m ks)
+    (apply (partial update-in m ks f) args)
+    m))
+
+(defn update-last-frame [{:keys [state] :as client} frame]
+  (let [sub-id (get-header frame :stomp.header/subscription)
+        new-state (swap! state update-if-contains [:subs sub-id] update-sub frame)]
+    (get-in new-state [:subs sub-id])))
+
+(defn- deliver-frame [client frame]
+  (when-let [subscription (update-last-frame client frame)]
+    ((:cb subscription) frame)))
 
 (defn on-message-received [client frame]
   (log/info "on-message-received" frame)
   (if (= :stomp.command/receipt (:stomp.frame/command frame))
     (when-let [receipt-promise (get-receipt-promise client frame)]
       (deliver receipt-promise frame))
-    (when-let [cb (get-cb client frame)]
-      (cb frame))))
+    (deliver-frame client frame)))
 
 (defn connect! [{:keys [transport] :as client} connection-params]
   @(transport/-connect! transport connection-params (partial on-message-received client))
@@ -118,8 +139,10 @@
   @(transport/-send! transport (->connect-frame connection-params))
   (log/info "Sent login"))
 
-(defn info [client]
-  {:state :connected})
+(defn info [{:keys [transport state] :as client}]
+  (let [subs (map #(dissoc % :cb) (vals (:subs @state)))]
+    {:connected (transport/-connected? transport)
+     :subscriptions subs}))
 
 (def default-opts {:stomp/transport :stomp.transport/netty
                    :customise-msg-fn identity
